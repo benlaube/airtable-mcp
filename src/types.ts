@@ -36,6 +36,9 @@ export const getDefaultOptions = (type: FieldType): Record<string, any> | undefi
   switch (type) {
     case 'number':
       return { precision: 0 };
+    case 'singleSelect':
+    case 'multiSelect':
+      return { choices: [] };
     case 'date':
       return { dateFormat: { name: 'local' } };
     case 'currency':
