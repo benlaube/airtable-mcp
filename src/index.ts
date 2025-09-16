@@ -9,7 +9,8 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import axios, { AxiosInstance } from "axios";
-import { FieldOption, fieldRequiresOptions, getDefaultOptions, FieldType } from "./types.js";
+import { validateField } from "./fieldValidation.js";
+import { toolHandlers, ToolContext } from "./tools/index.js";
 
 const API_KEY = process.env.AIRTABLE_API_KEY;
 if (!API_KEY) {
@@ -50,24 +51,11 @@ class AirtableServer {
     });
   }
 
-  private validateField(field: FieldOption): FieldOption {
-    const { type } = field;
-
-    // Remove options for fields that don't need them
-    if (!fieldRequiresOptions(type as FieldType)) {
-      const { options, ...rest } = field;
-      return rest;
-    }
-
-    // Add default options for fields that require them
-    if (!field.options) {
-      return {
-        ...field,
-        options: getDefaultOptions(type as FieldType),
-      };
-    }
-
-    return field;
+  private getToolContext(): ToolContext {
+    return {
+      axios: this.axiosInstance,
+      validateField,
+    };
   }
 
   private setupToolHandlers() {
@@ -395,228 +383,15 @@ class AirtableServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
-        switch (request.params.name) {
-          case "list_bases": {
-            const response = await this.axiosInstance.get("/meta/bases");
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data.bases, null, 2),
-              }],
-            };
-          }
-
-          case "list_tables": {
-            const { base_id } = request.params.arguments as { base_id: string };
-            const response = await this.axiosInstance.get(`/meta/bases/${base_id}/tables`);
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data.tables, null, 2),
-              }],
-            };
-          }
-
-          case "create_table": {
-            const { base_id, table_name, description, fields } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              description?: string;
-              fields?: FieldOption[];
-            };
-            
-            // Validate and prepare fields
-            const validatedFields = fields?.map(field => this.validateField(field));
-            
-            const response = await this.axiosInstance.post(`/meta/bases/${base_id}/tables`, {
-              name: table_name,
-              description,
-              fields: validatedFields,
-            });
-            
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "update_table": {
-            const { base_id, table_id, name, description } = request.params.arguments as {
-              base_id: string;
-              table_id: string;
-              name?: string;
-              description?: string;
-            };
-            
-            const response = await this.axiosInstance.patch(`/meta/bases/${base_id}/tables/${table_id}`, {
-              name,
-              description,
-            });
-            
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "create_field": {
-            const { base_id, table_id, field } = request.params.arguments as {
-              base_id: string;
-              table_id: string;
-              field: FieldOption;
-            };
-            
-            // Validate field before creation
-            const validatedField = this.validateField(field);
-            
-            const response = await this.axiosInstance.post(
-              `/meta/bases/${base_id}/tables/${table_id}/fields`,
-              validatedField
-            );
-            
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "update_field": {
-            const { base_id, table_id, field_id, updates } = request.params.arguments as {
-              base_id: string;
-              table_id: string;
-              field_id: string;
-              updates: Partial<FieldOption>;
-            };
-            
-            const response = await this.axiosInstance.patch(
-              `/meta/bases/${base_id}/tables/${table_id}/fields/${field_id}`,
-              updates
-            );
-            
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "list_records": {
-            const { base_id, table_name, max_records } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              max_records?: number;
-            };
-            const response = await this.axiosInstance.get(`/${base_id}/${table_name}`, {
-              params: max_records ? { maxRecords: max_records } : undefined,
-            });
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data.records, null, 2),
-              }],
-            };
-          }
-
-          case "create_record": {
-            const { base_id, table_name, fields } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              fields: Record<string, any>;
-            };
-            const response = await this.axiosInstance.post(`/${base_id}/${table_name}`, {
-              fields,
-            });
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "update_record": {
-            const { base_id, table_name, record_id, fields } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              record_id: string;
-              fields: Record<string, any>;
-            };
-            const response = await this.axiosInstance.patch(
-              `/${base_id}/${table_name}/${record_id}`,
-              { fields }
-            );
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "delete_record": {
-            const { base_id, table_name, record_id } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              record_id: string;
-            };
-            const response = await this.axiosInstance.delete(
-              `/${base_id}/${table_name}/${record_id}`
-            );
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          case "search_records": {
-            const { base_id, table_name, field_name, value } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              field_name: string;
-              value: string;
-            };
-            const response = await this.axiosInstance.get(`/${base_id}/${table_name}`, {
-              params: {
-                filterByFormula: `{${field_name}} = "${value}"`,
-              },
-            });
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data.records, null, 2),
-              }],
-            };
-          }
-
-          case "get_record": {
-            const { base_id, table_name, record_id } = request.params.arguments as {
-              base_id: string;
-              table_name: string;
-              record_id: string;
-            };
-            const response = await this.axiosInstance.get(
-              `/${base_id}/${table_name}/${record_id}`
-            );
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify(response.data, null, 2),
-              }],
-            };
-          }
-
-          default:
-            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
+        const handler = toolHandlers[request.params.name];
+        if (!handler) {
+          throw new McpError(
+            ErrorCode.MethodNotFound,
+            `Unknown tool: ${request.params.name}`
+          );
         }
+
+        return await handler(request.params.arguments, this.getToolContext());
       } catch (error) {
         if (axios.isAxiosError(error)) {
           throw new McpError(
